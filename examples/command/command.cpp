@@ -20,6 +20,12 @@
 #include <thread>
 #include <vector>
 #include <map>
+#include <iostream>
+
+// Include the json.hpp library
+#include "json.hpp"
+using json = nlohmann::json;
+
 
 // command-line parameters
 struct whisper_params {
@@ -38,6 +44,7 @@ struct whisper_params {
     bool print_special = false;
     bool print_energy  = false;
     bool no_timestamps = true;
+    bool json_output = false;
 
     std::string language  = "en";
     std::string model     = "models/ggml-base.en.bin";
@@ -68,6 +75,7 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (arg == "-tr"  || arg == "--translate")     { params.translate     = true; }
         else if (arg == "-ps"  || arg == "--print-special") { params.print_special = true; }
         else if (arg == "-pe"  || arg == "--print-energy")  { params.print_energy  = true; }
+        else if (arg == "-oj"  || arg == "--output-json")   { params.json_output   = true; }
         else if (arg == "-l"   || arg == "--language")      { params.language      = argv[++i]; }
         else if (arg == "-m"   || arg == "--model")         { params.model         = argv[++i]; }
         else if (arg == "-f"   || arg == "--file")          { params.fname_out     = argv[++i]; }
@@ -106,6 +114,7 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "  -f FNAME,   --file FNAME     [%-7s] text output file name\n",                       params.fname_out.c_str());
     fprintf(stderr, "  -cmd FNAME, --commands FNAME [%-7s] text file with allowed commands\n",             params.commands.c_str());
     fprintf(stderr, "  -p,         --prompt         [%-7s] the required activation prompt\n",              params.prompt.c_str());
+    fprintf(stderr, "  -oj,        --output-json    [%-7s] output result as JSON\n",                       params.prompt.c_str());
     fprintf(stderr, "\n");
 }
 
@@ -514,9 +523,9 @@ int process_general_transcription(struct whisper_context * ctx, audio_async &aud
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         if (ask_prompt) {
-            fprintf(stdout, "\n");
-            fprintf(stdout, "%s: Say the following phrase: '%s%s%s'\n", __func__, "\033[1m", k_prompt.c_str(), "\033[0m");
-            fprintf(stdout, "\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "%s: Say the following phrase: '%s%s%s'\n", __func__, "\033[1m", k_prompt.c_str(), "\033[0m");
+            fprintf(stderr, "\n");
 
             ask_prompt = false;
         }
@@ -525,7 +534,13 @@ int process_general_transcription(struct whisper_context * ctx, audio_async &aud
             audio.get(2000, pcmf32_cur);
 
             if (::vad_simple(pcmf32_cur, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, params.print_energy)) {
-                fprintf(stdout, "%s: Speech detected! Processing ...\n", __func__);
+                if (params.json_output) {
+                    json output;
+                    output["event"] = "speech_detected";
+                    std::cout << output.dump() << std::endl;
+                } else {
+                    fprintf(stdout, "%s: Speech detected! Processing ...\n", __func__);
+                }
 
                 int64_t t_ms = 0;
 
@@ -535,19 +550,38 @@ int process_general_transcription(struct whisper_context * ctx, audio_async &aud
 
                     const auto txt = ::trim(::transcribe(ctx, params, pcmf32_cur, prob0, t_ms));
 
-                    fprintf(stdout, "%s: Heard '%s%s%s', (t = %d ms)\n", __func__, "\033[1m", txt.c_str(), "\033[0m", (int) t_ms);
+                    if (params.json_output) {
+                        json output;
+                        output["event"] = "heard";
+                        output["text"] = txt;
+                        std::cout << output.dump() << std::endl;
+                    } else {
+                        fprintf(stdout, "%s: Heard '%s%s%s', (t = %d ms)\n", __func__, "\033[1m", txt.c_str(), "\033[0m", (int) t_ms);
+                    }
+
 
                     const float sim = similarity(txt, k_prompt);
 
                     if (txt.length() < 0.8*k_prompt.length() || txt.length() > 1.2*k_prompt.length() || sim < 0.8f) {
-                        fprintf(stdout, "%s: WARNING: prompt not recognized, try again\n", __func__);
+                        if (params.json_output) {
+                            json output;
+                            output["event"] = "prompt_not_recognized";
+                            std::cout << output.dump() << std::endl;
+                        } else {
+                            fprintf(stdout, "%s: WARNING: prompt not recognized, try again\n", __func__);
+                        }
                         ask_prompt = true;
                     } else {
-                        fprintf(stdout, "\n");
-                        fprintf(stdout, "%s: The prompt has been recognized!\n", __func__);
-                        fprintf(stdout, "%s: Waiting for voice commands ...\n", __func__);
-                        fprintf(stdout, "\n");
-
+                        if (params.json_output) {
+                            json output;
+                            output["event"] = "prompt_recognized";
+                            std::cout << output.dump() << std::endl;
+                        } else {
+                            fprintf(stdout, "\n");
+                            fprintf(stdout, "%s: The prompt has been recognized!\n", __func__);
+                            fprintf(stdout, "%s: Waiting for voice commands ...\n", __func__);
+                            fprintf(stdout, "\n");
+                        }
                         // save the audio for the prompt
                         pcmf32_prompt = pcmf32_cur;
                         have_prompt = true;
@@ -583,8 +617,16 @@ int process_general_transcription(struct whisper_context * ctx, audio_async &aud
 
                     const std::string command = ::trim(txt.substr(best_len));
 
-                    fprintf(stdout, "%s: Command '%s%s%s', (t = %d ms)\n", __func__, "\033[1m", command.c_str(), "\033[0m", (int) t_ms);
-                    fprintf(stdout, "\n");
+                    if (params.json_output) {
+                        json output;
+                        output["event"] = "command";
+                        output["text"] = command;
+                        output["prob"] = prob;
+                        std::cout << output.dump() << std::endl;
+                    } else {
+                        fprintf(stdout, "%s: Command '%s%s%s', (t = %d ms)\n", __func__, "\033[1m", command.c_str(), "\033[0m", (int) t_ms);
+                        fprintf(stdout, "\n");
+                    }
                 }
 
                 audio.clear();
