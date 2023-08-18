@@ -24,6 +24,20 @@ void ofprintf(FILE* file, const char * fmt, ...) {
     va_end(args);
 }
 
+bool verbose = false;
+
+// only print if verbose is true
+void ofprintf(FILE* file, const char * fmt, ...) {
+    if (!verbose) {
+        return;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(file, fmt, args);
+    va_end(args);
+}
+
 struct whisper_params {
     int32_t n_threads    = std::min(4, (int32_t) std::thread::hardware_concurrency());
     int32_t n_processors = 1;
@@ -66,7 +80,10 @@ struct whisper_print_user_data {
 
     const std::vector<std::vector<float>> * pcmf32s;
     Napi::ThreadSafeFunction* segment_callback;
+<<<<<<< HEAD
     Napi::ThreadSafeFunction* progress_callback;
+=======
+>>>>>>> afe2a3e (Added segment callback to addon.cpp)
 };
 
 //  500 -> 00:05.000
