@@ -5,7 +5,6 @@ const { whisper } = require(path.join(
 ));
 const { promisify } = require("util");
 
-const whisperAsync = promisify(whisper);
 
 const whisperParams = {
   language: "en",
@@ -31,6 +30,39 @@ for (const key in params) {
 
 console.log("whisperParams =", whisperParams);
 
-whisperAsync(whisperParams).then((result) => {
-  console.log(`Result from whisper: ${result}`);
-});
+const whisperPromise = async ({
+  whisperParams,
+  verbose,
+  onSegment}) => {
+    return new Promise((resolve, reject) => {
+      whisper(whisperParams, (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      }, (err, segment) => {
+        if (err) {
+          reject(err);
+        } else {
+          onSegment(segment);
+        }
+      });
+    });
+  }
+
+(async () => {
+  try {
+    const result = await whisperPromise({
+      whisperParams,
+      verbose: true,
+      onSegment: (segment) => {
+        console.log(segment);
+      }
+    });
+    console.log("result =", result);
+  } catch (err) {
+    console.error(err);
+  }
+})();
+
