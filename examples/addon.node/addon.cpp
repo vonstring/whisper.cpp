@@ -64,6 +64,7 @@ struct whisper_print_user_data {
 
     const std::vector<std::vector<float>> * pcmf32s;
     Napi::ThreadSafeFunction* segment_callback;
+    Napi::ThreadSafeFunction* progress_callback;
 };
 
 //  500 -> 00:05.000
@@ -85,6 +86,17 @@ std::string to_timestamp(int64_t t, bool comma = false) {
 
 int timestamp_to_sample(int64_t t, int n_samples) {
     return std::max(0, std::min((int) n_samples - 1, (int) ((t*WHISPER_SAMPLE_RATE)/100)));
+}
+
+void handle_progress_callback(struct whisper_context * ctx, struct whisper_state * state, int progress, void * user_data) {
+    ofprintf(stderr, "progress: %d%%\n", progress);
+
+    const auto & progress_callback = *((whisper_print_user_data *) user_data)->progress_callback;
+
+    progress_callback.BlockingCall([progress](Napi::Env env, Napi::Function jsCallback) {
+        jsCallback.Call({ env.Null(), Napi::Number::New(env, progress) });
+    });
+
 }
 
 void whisper_print_segment_callback(struct whisper_context * ctx, struct whisper_state * state, int n_new, void * user_data) {
@@ -164,7 +176,7 @@ void whisper_print_segment_callback(struct whisper_context * ctx, struct whisper
     }
 }
 
-int run(whisper_params &params, std::vector<std::vector<std::string>> &result, Napi::ThreadSafeFunction& segment_callback) {
+int run(whisper_params &params, std::vector<std::vector<std::string>> &result, Napi::ThreadSafeFunction& segment_callback, Napi::ThreadSafeFunction& progress_callback) {
     if (params.fname_inp.empty()) {
         ofprintf(stderr, "error: no input files specified\n");
         return 2;
@@ -253,13 +265,16 @@ int run(whisper_params &params, std::vector<std::vector<std::string>> &result, N
 
             wparams.initial_prompt   = params.prompt.c_str();
 
-            whisper_print_user_data user_data = { &params, &pcmf32s, &segment_callback };
+            whisper_print_user_data user_data = { &params, &pcmf32s, &segment_callback, &progress_callback };
 
             // this callback is called on each new segment
             if (!wparams.print_realtime) {
                 wparams.new_segment_callback           = whisper_print_segment_callback;
                 wparams.new_segment_callback_user_data = &user_data;
             }
+
+            wparams.progress_callback           = handle_progress_callback;
+            wparams.progress_callback_user_data = &user_data;
 
             // example for abort mechanism
             // in this example, we do not abort the processing, but we could if the flag is set to true
@@ -301,11 +316,11 @@ int run(whisper_params &params, std::vector<std::vector<std::string>> &result, N
 
 class Worker : public Napi::AsyncWorker {
  public:
-  Worker(Napi::Function& callback1, Napi::ThreadSafeFunction& segment_callback, whisper_params params)
-      : Napi::AsyncWorker(callback1), segment_callback(segment_callback), params(params) {}
+  Worker(Napi::Function& callback1, Napi::ThreadSafeFunction& segment_callback, Napi::ThreadSafeFunction& progress_callback, whisper_params params)
+      : Napi::AsyncWorker(callback1), segment_callback(segment_callback), progress_callback(progress_callback), params(params) {}
 
   void Execute() override {
-    run(params, result, segment_callback);
+    run(params, result, segment_callback, progress_callback);
   }
 
   void OnOK() override {
@@ -320,10 +335,12 @@ class Worker : public Napi::AsyncWorker {
     }
     Callback().Call({Env().Null(), res});
     segment_callback.Release();
+    progress_callback.Release();
   }
 
  private:
   Napi::ThreadSafeFunction segment_callback;
+  Napi::ThreadSafeFunction progress_callback;
   whisper_params params;
   std::vector<std::vector<std::string>> result;
 };
@@ -335,8 +352,8 @@ Napi::Value whisper(const Napi::CallbackInfo& info) {
   if (info.Length() <= 0 || !info[0].IsObject()) {
     Napi::TypeError::New(env, "object expected").ThrowAsJavaScriptException();
   }
-  if (info.Length() == 4) {
-    verbose = info[3].As<Napi::Boolean>();
+  if (info.Length() == 5) {
+    verbose = info[4].As<Napi::Boolean>();
   }
   if (!verbose) whisper_set_log_callback([](const char *line) {});
   whisper_params params;
@@ -359,7 +376,14 @@ Napi::Value whisper(const Napi::CallbackInfo& info) {
     0,
     1
   );
-  Worker* worker = new Worker(callback, segment_callback, params);
+  Napi::ThreadSafeFunction progress_callback = Napi::ThreadSafeFunction::New(
+    env,
+    info[3].As<Napi::Function>(),
+    "Progress callback",
+    0,
+    1
+  );
+  Worker* worker = new Worker(callback, segment_callback, progress_callback, params);
   worker->Queue();
   return env.Undefined();
 }

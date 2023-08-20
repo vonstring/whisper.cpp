@@ -9,7 +9,7 @@ const { promisify } = require("util");
 const whisperParams = {
   language: "en",
   model: path.join(__dirname, "../../models/ggml-base.en.bin"),
-  fname_inp: "../../samples/jfk.wav",
+  fname_inp: "../../samples/jfk.wav"
 };
 
 const arguments = process.argv.slice(2);
@@ -33,23 +33,30 @@ console.log("whisperParams =", whisperParams);
 const whisperPromise = async ({
   whisperParams,
   verbose,
-  onSegment}) => {
-    return new Promise((resolve, reject) => {
-      whisper(whisperParams, (err, result) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(result);
-        }
-      }, (err, segment) => {
-        if (err) {
-          reject(err);
-        } else {
-          onSegment(segment);
-        }
-      });
-    });
-  }
+  onSegment,
+  onProgress }) => {
+  return new Promise((resolve, reject) => {
+    whisper(whisperParams, (err, result) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(result);
+      }
+    }, (err, segment) => {
+      if (err) {
+        reject(err);
+      } else {
+        if (onSegment) onSegment(segment);
+      }
+    }, (err, progress) => {
+      if (err) {
+        reject(err);
+      } else {
+        if (onProgress) onProgress(progress);
+      }
+    }, verbose);
+  });
+}
 
 (async () => {
   try {
@@ -58,6 +65,9 @@ const whisperPromise = async ({
       verbose: true,
       onSegment: (segment) => {
         console.log(segment);
+      },
+      onProgress: (progress) => {
+        console.log(`progress = ${progress}`);
       }
     });
     console.log("result =", result);
