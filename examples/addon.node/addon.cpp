@@ -80,10 +80,7 @@ struct whisper_print_user_data {
 
     const std::vector<std::vector<float>> * pcmf32s;
     Napi::ThreadSafeFunction* segment_callback;
-<<<<<<< HEAD
     Napi::ThreadSafeFunction* progress_callback;
-=======
->>>>>>> afe2a3e (Added segment callback to addon.cpp)
 };
 
 //  500 -> 00:05.000
