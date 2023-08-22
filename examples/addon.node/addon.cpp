@@ -155,8 +155,9 @@ void whisper_print_segment_callback(struct whisper_context * ctx, struct whisper
 
         // colorful print bug
         //
-        const char * text = whisper_full_get_segment_text(ctx, i);
-        ofprintf(stderr, "%s%s", speaker.c_str(), text);
+        const char * text_ptr = whisper_full_get_segment_text(ctx, i);
+        ofprintf(stderr, "%s%s", speaker.c_str(), text_ptr);
+        std::string text = text_ptr;
 
         segment_callback.BlockingCall([text, t0, t1](Napi::Env env, Napi::Function jsCallback) {
             Napi::Object result = Napi::Object::New(env);
