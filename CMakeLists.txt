@@ -459,7 +459,7 @@ endif()
 
 set(TARGET whisper)
 
-add_library(${TARGET} STATIC
+add_library(${TARGET}
     ggml.h
     ggml.c
     ggml-alloc.h
