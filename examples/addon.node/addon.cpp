@@ -8,6 +8,7 @@
 #include <vector>
 #include <cmath>
 #include <cstdint>
+#include <cstdarg>
 
 bool verbose = false;
 
