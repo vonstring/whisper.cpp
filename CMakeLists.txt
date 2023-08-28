@@ -341,7 +341,7 @@ endif()
 
 set(TARGET whisper)
 
-add_library(${TARGET} STATIC
+add_library(${TARGET}
     ggml.h
     ggml.c
     ${GGML_CUDA_SOURCES}
@@ -349,6 +349,13 @@ add_library(${TARGET} STATIC
     whisper.h
     whisper.cpp
     )
+
+# Add these lines
+if(APPLE)
+    set_target_properties(${TARGET} PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_NAME_DIR "@loader_path/.")
+endif()
 
 include(DefaultTargetOptions)
 
