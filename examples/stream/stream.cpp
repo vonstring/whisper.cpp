@@ -34,7 +34,6 @@ struct whisper_params {
     int32_t step_ms    = 3000;
     int32_t length_ms  = 10000;
     int32_t keep_ms    = 200;
-    int32_t capture_id = -1;
     int32_t max_tokens = 32;
     int32_t audio_ctx  = 0;
 
@@ -70,7 +69,6 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (                  arg == "--step")          { params.step_ms       = std::stoi(argv[++i]); }
         else if (                  arg == "--length")        { params.length_ms     = std::stoi(argv[++i]); }
         else if (                  arg == "--keep")          { params.keep_ms       = std::stoi(argv[++i]); }
-        else if (arg == "-c"    || arg == "--capture")       { params.capture_id    = std::stoi(argv[++i]); }
         else if (arg == "-mt"   || arg == "--max-tokens")    { params.max_tokens    = std::stoi(argv[++i]); }
         else if (arg == "-ac"   || arg == "--audio-ctx")     { params.audio_ctx     = std::stoi(argv[++i]); }
         else if (arg == "-vth"  || arg == "--vad-thold")     { params.vad_thold     = std::stof(argv[++i]); }
@@ -107,7 +105,6 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "            --step N        [%-7d] audio step size in milliseconds\n",                params.step_ms);
     fprintf(stderr, "            --length N      [%-7d] audio length in milliseconds\n",                   params.length_ms);
     fprintf(stderr, "            --keep N        [%-7d] audio to keep from previous step in ms\n",         params.keep_ms);
-    fprintf(stderr, "  -c ID,    --capture ID    [%-7d] capture device ID\n",                              params.capture_id);
     fprintf(stderr, "  -mt N,    --max-tokens N  [%-7d] maximum number of tokens per audio chunk\n",       params.max_tokens);
     fprintf(stderr, "  -ac N,    --audio-ctx N   [%-7d] audio context size (0 - all)\n",                   params.audio_ctx);
     fprintf(stderr, "  -vth N,   --vad-thold N   [%-7.2f] voice activity detection threshold\n",           params.vad_thold);
@@ -149,15 +146,8 @@ int main(int argc, char ** argv) {
     params.no_context    |= use_vad;
     params.max_tokens     = 0;
 
-    // init audio
-
-    audio_async audio(params.length_ms);
-    if (!audio.init(params.capture_id, WHISPER_SAMPLE_RATE)) {
-        fprintf(stderr, "%s: audio.init() failed!\n", __func__);
-        return 1;
-    }
-
-    audio.resume();
+    // audio init
+    audio_async audio(params.length_ms, WHISPER_SAMPLE_RATE);
 
     // whisper init
     if (params.language != "auto" && whisper_lang_id(params.language.c_str()) == -1){
@@ -236,7 +226,7 @@ int main(int argc, char ** argv) {
 
     auto t_last  = std::chrono::high_resolution_clock::now();
     const auto t_start = t_last;
-
+    int64_t current_ts = 0;
     // main audio loop
     while (is_running) {
         if (params.save_audio) {
@@ -254,15 +244,12 @@ int main(int argc, char ** argv) {
         if (!use_vad) {
             while (true) {
                 audio.get(params.step_ms, pcmf32_new);
-
                 if ((int) pcmf32_new.size() > 2*n_samples_step) {
                     fprintf(stderr, "\n\n%s: WARNING: cannot process audio fast enough, dropping audio ...\n\n", __func__);
-                    audio.clear();
                     continue;
                 }
 
                 if ((int) pcmf32_new.size() >= n_samples_step) {
-                    audio.clear();
                     break;
                 }
 
@@ -372,7 +359,7 @@ int main(int argc, char ** argv) {
                         const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
                         const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
-                        std::string output = "[" + to_timestamp(t0) + " --> " + to_timestamp(t1) + "]  " + text;
+                        std::string output = "[" + to_timestamp(t0 + current_ts / 10) + " --> " + to_timestamp(t1 + current_ts / 10) + "]  " + text;
 
                         if (whisper_full_get_segment_speaker_turn_next(ctx, i)) {
                             output += " [SPEAKER_TURN]";
@@ -398,7 +385,7 @@ int main(int argc, char ** argv) {
                     printf("### Transcription %d END\n", n_iter);
                 }
             }
-
+            current_ts += pcmf32.size()*1000.0/WHISPER_SAMPLE_RATE;
             ++n_iter;
 
             if (!use_vad && (n_iter % n_new_line) == 0) {
@@ -423,8 +410,6 @@ int main(int argc, char ** argv) {
             fflush(stdout);
         }
     }
-
-    audio.pause();
 
     whisper_print_timings(ctx);
     whisper_free(ctx);

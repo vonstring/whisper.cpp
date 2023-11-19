@@ -14,16 +14,8 @@
 
 class audio_async {
 public:
-    audio_async(int len_ms);
+    audio_async(int len_ms, int sample_rate);
     ~audio_async();
-
-    bool init(int capture_id, int sample_rate);
-
-    // start capturing audio via the provided SDL callback
-    // keep last len_ms seconds of audio in a circular buffer
-    bool resume();
-    bool pause();
-    bool clear();
 
     // callback to be called by SDL
     void callback(uint8_t * stream, int len);
